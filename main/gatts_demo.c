@@ -210,6 +210,19 @@ void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare
 void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
 /*
+    开始
+    ↓
+    设置广播数据 → ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT
+    ↓
+    设置扫描响应数据 → ESP_GAP_BLE_SCAN_RSP_DATA_RAW_SET_COMPLETE_EVT
+    ↓
+    两个配置都完成？ → 是 → 启动广播
+    ↓
+    ESP_GAP_BLE_ADV_START_COMPLETE_EVT
+    ↓
+    广播运行中
+*/
+/*
     gap事件处理函数
 */
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
@@ -275,18 +288,54 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
+/*
+    执行流程图
+    开始
+      ↓
+    检查 need_rsp?
+      ↓是
+    检查 is_prep?
+      ├─ 是 → 验证偏移和长度
+      │       ↓
+      │      分配准备缓冲区(如果需要)
+      │       ↓
+      │      构建并发送响应
+      │       ↓
+      │      存储数据片段
+      │
+      └─ 否 → 发送简单确认响应
 
+    准备写入(Prepare Write)流程：
+    客户端(Client)                服务器(Server)
+    |--- Prepare Write Request --->|
+    |                              | # 验证并存储数据片段
+    |<-- Prepare Write Response ---|
+    |                              |
+    |--- Execute Write Request --->| # 所有片段接收完成后执行
+    |<-- Execute Write Response ---|
+*/
 void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param){
     esp_gatt_status_t status = ESP_GATT_OK;
     //后续步骤需要esp_ble_gatts_send_response
+    //只有需要响应的写请求才会进行进一步处理
     if (param->write.need_rsp){
         //写入操作为预备写入操作
-        if (param->write.is_prep) {
+        if (param->write.is_prep) {// 处理准备写请求...
+            /*
+                确保写入偏移不超过缓冲区大小
+                确保写入数据不会溢出缓冲区 
+            */
+            // 偏移量检查
             if (param->write.offset > PREPARE_BUF_MAX_SIZE) {
                 status = ESP_GATT_INVALID_OFFSET;
+            // 数据长度检查（偏移 + 长度）
             } else if ((param->write.offset + param->write.len) > PREPARE_BUF_MAX_SIZE) {
                 status = ESP_GATT_INVALID_ATTR_LEN;
             }
+            /*
+                延迟分配：只在第一次需要时分配缓冲区
+                错误处理：分配失败时设置错误状态并记录日志
+            */
             if (status == ESP_GATT_OK && prepare_write_env->prepare_buf == NULL) {
                 prepare_write_env->prepare_buf = (uint8_t *)malloc(PREPARE_BUF_MAX_SIZE*sizeof(uint8_t));
                 prepare_write_env->prepare_len = 0;
@@ -296,11 +345,16 @@ void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare
                 }
             }
 
+            //表示GATT远程读取请求的响应类型
             esp_gatt_rsp_t *gatt_rsp = (esp_gatt_rsp_t *)malloc(sizeof(esp_gatt_rsp_t));
             if (gatt_rsp) {
+                //值数组中数据的当前长度。
                 gatt_rsp->attr_value.len = param->write.len;
+                //GATT属性的唯一标识符（句柄）。
                 gatt_rsp->attr_value.handle = param->write.handle;
+                //用于部分更新的属性值偏移量。
                 gatt_rsp->attr_value.offset = param->write.offset;
+                //访问此属性的认证要求。
                 gatt_rsp->attr_value.auth_req = ESP_GATT_AUTH_REQ_NONE;
                 memcpy(gatt_rsp->attr_value.value, param->write.value, param->write.len);
                 esp_err_t response_err = esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, status, gatt_rsp);
@@ -320,22 +374,39 @@ void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare
                    param->write.len);
             prepare_write_env->prepare_len += param->write.len;
 
-        }else{
+        }else{// 处理普通写请求...
             esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, status, NULL);
         }
     }
 }
 
+/*
+    客户端行为:     准备写入1 → 准备写入2 → ... → 准备写入N → 执行写入请求
+    服务器响应:     准备响应1 → 准备响应2 → ... → 准备响应N → 执行写入响应
+                                                            ↑
+                                                     这个函数被调用example_exec_write_event_env
+*/
 void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param){
     if (param->exec_write.exec_write_flag == ESP_GATT_PREP_WRITE_EXEC){
+        //情况1：执行写入（提交数据）
+        //动作：使用 ESP_LOG_BUFFER_HEX 打印接收到的完整数据
+        //目的：调试和验证数据正确性
         ESP_LOG_BUFFER_HEX(GATTS_TAG, prepare_write_env->prepare_buf, prepare_write_env->prepare_len);
     }else{
+        //情况2：取消写入（丢弃数据）
+        //动作：仅记录日志，不处理数据
+        //目的：通知用户操作被取消
         ESP_LOGI(GATTS_TAG,"Prepare write cancel");
     }
+    //内存管理操作：
+    //检查指针有效性
     if (prepare_write_env->prepare_buf) {
+        //释放内存
         free(prepare_write_env->prepare_buf);
+        //置空指针：prepare_write_env->prepare_buf = NULL（防止野指针）
         prepare_write_env->prepare_buf = NULL;
     }
+    //重置长度
     prepare_write_env->prepare_len = 0;
 }
 
