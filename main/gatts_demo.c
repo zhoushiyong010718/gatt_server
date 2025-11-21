@@ -72,14 +72,22 @@ static uint16_t local_mtu = 23;
 
 static uint8_t char_value_read[CONFIG_EXAMPLE_CHAR_READ_DATA_LEN] = {0xDE,0xED,0xBE,0xEF};
 
-
+//特征属性位掩码类型
 static esp_gatt_char_prop_t a_property = 0;
+
+//特征属性位掩码类型。
 static esp_gatt_char_prop_t b_property = 0;
 
+//设置属性值类型
 static esp_attr_value_t gatts_demo_char1_val =
 {
+    //属性最大值长度
     .attr_max_len = GATTS_DEMO_CHAR_VAL_LEN_MAX,
+
+    //属性当前值长度
     .attr_len     = sizeof(char1_str),
+
+    //属性值指针
     .attr_value   = char1_str,
 };
 
@@ -201,6 +209,9 @@ static prepare_type_env_t b_prepare_write_env;
 void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
+/*
+    gap事件处理函数
+*/
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     switch (event) {
@@ -264,9 +275,12 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
+
 void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param){
     esp_gatt_status_t status = ESP_GATT_OK;
+    //后续步骤需要esp_ble_gatts_send_response
     if (param->write.need_rsp){
+        //写入操作为预备写入操作
         if (param->write.is_prep) {
             if (param->write.offset > PREPARE_BUF_MAX_SIZE) {
                 status = ESP_GATT_INVALID_OFFSET;
@@ -740,6 +754,9 @@ void app_main(void)
     esp_err_t ret;
 
     // Initialize NVS.
+    /*
+        初始化NVS
+    */
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -751,52 +768,90 @@ void app_main(void)
     memcpy(test_device_name, esp_bluedroid_get_example_name(), ESP_BLE_ADV_NAME_LEN_MAX);
     #endif
 
+    /*
+        根据模式释放控制器内存。
+    */
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
+    /*
+        蓝牙控制器结构
+    */
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+
+    /*
+        初始化蓝牙控制器以分配任务及其他资源。
+    */
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret) {
         ESP_LOGE(GATTS_TAG, "%s initialize controller failed: %s", __func__, esp_err_to_name(ret));
         return;
     }
 
+    /*
+        启动蓝牙控制器
+    */
     ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret) {
         ESP_LOGE(GATTS_TAG, "%s enable controller failed: %s", __func__, esp_err_to_name(ret));
         return;
     }
 
+    /*
+        初始化并分配蓝牙资源，必须在执行任何蓝牙操作之前完成。
+    */
     ret = esp_bluedroid_init();
     if (ret) {
         ESP_LOGE(GATTS_TAG, "%s init bluetooth failed: %s", __func__, esp_err_to_name(ret));
         return;
     }
+
+    /*
+        使能蓝牙
+    */
     ret = esp_bluedroid_enable();
     if (ret) {
         ESP_LOGE(GATTS_TAG, "%s enable bluetooth failed: %s", __func__, esp_err_to_name(ret));
         return;
     }
+
     // Note: Avoid performing time-consuming operations within callback functions.
+    /*
+        注册gatt服务器应用程序回调
+    */
     ret = esp_ble_gatts_register_callback(gatts_event_handler);
     if (ret){
         ESP_LOGE(GATTS_TAG, "gatts register error, error code = %x", ret);
         return;
     }
+
+    /*
+        此函数在发生gap事件时被调用，例如扫描结果。
+    */
     ret = esp_ble_gap_register_callback(gap_event_handler);
     if (ret){
         ESP_LOGE(GATTS_TAG, "gap register error, error code = %x", ret);
         return;
     }
+
+    /*
+        注册GATT服务器应用程序。
+    */
     ret = esp_ble_gatts_app_register(PROFILE_A_APP_ID);
     if (ret){
         ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
         return;
     }
+
+    /*
+        注册GATT服务器应用程序。
+    */
     ret = esp_ble_gatts_app_register(PROFILE_B_APP_ID);
     if (ret){
         ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
         return;
     }
+
+
     esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(500);
     if (local_mtu_ret){
         ESP_LOGE(GATTS_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
