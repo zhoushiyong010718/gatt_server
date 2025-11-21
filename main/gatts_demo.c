@@ -187,6 +187,7 @@ struct gatts_profile_inst {
 };
 
 /* One gatt-based profile one app_id and one gatts_if, this array will store the gatts_if returned by ESP_GATTS_REG_EVT */
+/* 基于GATTS的配置文件包含一个app_id和一个gatts_if，该数组将存储ESP_GATTS_REG_EVT事件返回的gatts_if */
 static struct gatts_profile_inst gl_profile_tab[PROFILE_NUM] = {
     [PROFILE_A_APP_ID] = {
         .gatts_cb = gatts_profile_a_event_handler,
@@ -412,13 +413,22 @@ void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble
 
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     switch (event) {
+    
+    /*
+        当使用esp_ble_gatts_app_register注册GATT服务器应用程序时触发此事件
+    */
     case ESP_GATTS_REG_EVT:
         ESP_LOGI(GATTS_TAG, "GATT server register, status %d, app_id %d, gatts_if %d", param->reg.status, param->reg.app_id, gatts_if);
+        //指示服务为主服务。
         gl_profile_tab[PROFILE_A_APP_ID].service_id.is_primary = true;
+        //GATT ID的实例ID组件
         gl_profile_tab[PROFILE_A_APP_ID].service_id.id.inst_id = 0x00;
+        //UUID长度
         gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
+        //16bit UUID
         gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID_TEST_A;
 
+        
         esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(test_device_name);
         if (set_dev_name_ret){
             ESP_LOGE(GATTS_TAG, "set device name failed, error code = %x", set_dev_name_ret);
